@@ -1,12 +1,25 @@
-name: Banking Backend CI
+
+name: Banking Backend CI/CD
 
 on:
   push:
     branches:
       - dev
+
   pull_request:
     branches:
       - dev
+
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Select deployment environment"
+        required: true
+        type: choice
+        options:
+          - dev
+          - qa
+          - prod
 
 permissions:
   id-token: write
@@ -14,9 +27,12 @@ permissions:
 
 env:
   AWS_REGION: us-east-1
-  ECR_REPOSITORY: banking-dev-backend
 
 jobs:
+
+  # --------------------------------------------------
+  # TEST
+  # --------------------------------------------------
   test:
     name: Test
     runs-on: ubuntu-latest
@@ -41,6 +57,10 @@ jobs:
         run: |
           python -m pytest
 
+
+  # --------------------------------------------------
+  # SECURITY
+  # --------------------------------------------------
   security:
     name: Security Scan
     runs-on: ubuntu-latest
@@ -57,36 +77,57 @@ jobs:
           severity: CRITICAL,HIGH
           exit-code: 1
 
-  docker:
+
+  # --------------------------------------------------
+  # BUILD & PUSH
+  # --------------------------------------------------
+  build:
     name: Build and Push Image
     needs:
       - test
       - security
 
-    # Only push images for actual commits to dev.
-    # PRs should run tests/security but must not push to ECR.
-    if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/dev')
 
     runs-on: ubuntu-latest
 
-    permissions:
-      id-token: write
-      contents: read
+    environment:
+      name: ${{ github.event.inputs.environment || 'qa' }}
+
+    env:
+      DEPLOY_ENV: ${{ github.event.inputs.environment || 'qa' }}
+      ECR_REPOSITORY: banking-${{ github.event.inputs.environment || 'qa' }}-backend
+      GITOPS_VALUES_FILE: values-${{ github.event.inputs.environment || 'qa' }}.yaml
 
     steps:
+
       - name: Checkout
         uses: actions/checkout@v4
 
+
+      # ------------------------------------------------
+      # AWS AUTHENTICATION
+      # ------------------------------------------------
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-region: ${{ env.AWS_REGION }}
-          role-to-assume: ${{ secrets.AWS_GITHUB_ACTIONS_ROLE_ARN }}
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
 
-      - name: Login to ECR
+
+      # ------------------------------------------------
+      # ECR LOGIN
+      # ------------------------------------------------
+      - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
+
+      # ------------------------------------------------
+      # DOCKER BUILD
+      # ------------------------------------------------
       - name: Build Docker image
         working-directory: app/backend
         env:
@@ -97,6 +138,10 @@ jobs:
             -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
             .
 
+
+      # ------------------------------------------------
+      # DOCKER SECURITY SCAN
+      # ------------------------------------------------
       - name: Scan Docker image
         uses: aquasecurity/trivy-action@master
         with:
@@ -106,6 +151,10 @@ jobs:
           ignore-unfixed: true
           exit-code: 1
 
+
+      # ------------------------------------------------
+      # PUSH IMAGE
+      # ------------------------------------------------
       - name: Push image
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
@@ -114,23 +163,34 @@ jobs:
           docker push \
             $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
 
-      
-            
+
+      # ------------------------------------------------
+      # UPDATE GITOPS
+      # ------------------------------------------------
       - name: Update GitOps image tag
         env:
           GITOPS_TOKEN: ${{ secrets.GITOPS_REPO_TOKEN }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
-          git clone https://x-access-token:${GITOPS_TOKEN}@github.com/venkatesh-thomm/banking-platform-devops.git gitops
+
+          git clone \
+            https://x-access-token:${GITOPS_TOKEN}@github.com/venkatesh-thomm/banking-platform-devops.git \
+            gitops
 
           cd gitops
+
           git checkout dev
 
-          sed -i "s/^  tag: .*/  tag: \"${IMAGE_TAG}\"/" helm/banking-backend/values.yaml
+          sed -i \
+            "s/^  tag: .*/  tag: \"${IMAGE_TAG}\"/" \
+            helm/banking-backend/${GITOPS_VALUES_FILE}
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          git add helm/banking-backend/values.yaml
-          git commit -m "Update banking backend image to ${IMAGE_TAG}"
-          git push origin dev      
+          git add helm/banking-backend/${GITOPS_VALUES_FILE}
+
+          git commit \
+            -m "Update ${DEPLOY_ENV} banking backend image to ${IMAGE_TAG}"
+
+          git push origin dev
