@@ -1,13 +1,13 @@
-
 from fastapi import FastAPI
 from sqlalchemy import text
-
-from database import engine
 from prometheus_fastapi_instrumentator import Instrumentator
 
+from database import engine
 
 app = FastAPI(title="Banking Platform API")
+
 Instrumentator().instrument(app).expose(app)
+
 
 @app.get("/")
 def root():
@@ -34,4 +34,3 @@ def health_check():
             "database": "disconnected",
             "error": str(e)
         }
-
