@@ -1,9 +1,18 @@
+
 from fastapi import FastAPI
 from sqlalchemy import text
 
 from database import engine
 
 app = FastAPI(title="Banking Platform API")
+
+
+@app.get("/")
+def root():
+    return {
+        "message": "Banking Platform API",
+        "status": "running"
+    }
 
 
 @app.get("/health")
@@ -23,3 +32,4 @@ def health_check():
             "database": "disconnected",
             "error": str(e)
         }
+
