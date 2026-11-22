@@ -35,7 +35,7 @@ jobs:
   # --------------------------------------------------
   test:
     name: Test
-    runs-on: ubuntu-slim
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
@@ -71,7 +71,7 @@ jobs:
   # --------------------------------------------------
   security:
     name: Security Scan
-    runs-on: ubuntu-slim
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
@@ -102,7 +102,7 @@ jobs:
        github.event_name == 'push'
       )
 
-    runs-on: ubuntu-slim
+    runs-on: ubuntu-latest
 
 
     env:
