@@ -160,7 +160,16 @@ jobs:
           severity: CRITICAL,HIGH
           ignore-unfixed: true
           exit-code: 1
-
+      
+      - name: Create ECR repository if not exists
+        run: |
+           aws ecr describe-repositories \
+           --repository-names $ECR_REPOSITORY \
+           --region $AWS_REGION \
+                 || aws ecr create-repository \
+             --repository-name $ECR_REPOSITORY \
+             --region $AWS_REGION \
+              --image-scanning-configuration scanOnPush=true
 
       # ------------------------------------------------
       # PUSH IMAGE
